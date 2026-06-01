@@ -1,0 +1,92 @@
+name: SmartDischarge CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: python -m pytest tests/ -v --tb=short
+
+      - name: Lint
+        run: |
+          pip install flake8 -q
+          flake8 src/ --max-line-length=100 --ignore=E501,W503
+
+  pipeline:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run full pipeline
+        run: python run_pipeline.py
+
+      - name: Validate model AUROC gate
+        run: |
+          python -c "
+          import json
+          with open('docs/model_report.json') as f:
+              r = json.load(f)
+          auroc = r['test_metrics']['auroc']
+          print(f'AUROC: {auroc}')
+          assert auroc > 0.50, f'AUROC {auroc} below minimum gate 0.50'
+          print('AUROC gate PASSED')
+          "
+
+      - name: Upload model artefacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: model-artefacts
+          path: |
+            data/processed/model.pkl
+            data/processed/explainer.pkl
+            docs/model_report.json
+            docs/monitoring_report.json
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: pipeline
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t smartdischarge:${{ github.sha }} .
+
+      - name: Run container health check
+        run: |
+          docker run -d --name sd-test -p 8000:8000 smartdischarge:${{ github.sha }}
+          sleep 8
+          curl -f http://localhost:8000/health && echo "Health check passed"
+          docker stop sd-test

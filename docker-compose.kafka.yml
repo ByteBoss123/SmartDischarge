@@ -1,0 +1,108 @@
+version: "3.9"
+
+# Local development stack for SmartDischarge Kafka integration
+# Starts: Zookeeper, Kafka broker, Kafka UI (port 8080)
+#
+# Usage:
+#   docker compose up -d
+#   docker compose down -v   # tear down + wipe volumes
+
+services:
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: smartdischarge-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME:   2000
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo ruok | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: smartdischarge-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"     # host access (producer/consumer running locally)
+      - "9093:9093"     # internal Docker network
+    environment:
+      KAFKA_BROKER_ID:                        1
+      KAFKA_ZOOKEEPER_CONNECT:                "zookeeper:2181"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:   "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_ADVERTISED_LISTENERS:             "PLAINTEXT://kafka:9093,PLAINTEXT_HOST://localhost:9092"
+      KAFKA_INTER_BROKER_LISTENER_NAME:       "PLAINTEXT"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE:        "true"
+      KAFKA_LOG_RETENTION_HOURS:              24
+      KAFKA_LOG_RETENTION_BYTES:              104857600   # 100 MB
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9093", "--list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  kafka-init:
+    # Creates topics with correct partition/replication config on first boot
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: smartdischarge-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "
+      echo 'Creating SmartDischarge Kafka topics...'
+      kafka-topics --bootstrap-server kafka:9093 --create --if-not-exists \
+        --topic smartdischarge.encounters.raw \
+        --partitions 3 --replication-factor 1 \
+        --config retention.ms=86400000
+
+      kafka-topics --bootstrap-server kafka:9093 --create --if-not-exists \
+        --topic smartdischarge.predictions \
+        --partitions 3 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:9093 --create --if-not-exists \
+        --topic smartdischarge.alerts \
+        --partitions 1 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      echo 'Topics created:'
+      kafka-topics --bootstrap-server kafka:9093 --list
+      "
+    restart: "no"
+
+  kafka-ui:
+    # Browser UI at http://localhost:8080 — inspect topics, messages, consumer groups
+    image: provectuslabs/kafka-ui:latest
+    container_name: smartdischarge-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME:            smartdischarge-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9093
+
+  smartdischarge-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smartdischarge-api
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9093
+      KAFKA_ENABLED:           "true"
+    volumes:
+      - ./data:/app/data
+      - ./docs:/app/docs

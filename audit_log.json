@@ -1,0 +1,15 @@
+{
+  "run_timestamp": "2026-05-28T22:49:30.054299",
+  "source_file": "/home/claude/smartdischarge/data/raw/diabetic_data.csv",
+  "source_checksum_md5": "74b82709084bd5c22353a522dd4af91d",
+  "raw_rows": 101766,
+  "clean_rows": 81155,
+  "drop_rate_pct": 20.25,
+  "readmit_30d_rate_pct": 5.67,
+  "schema_validation": {
+    "passed": false,
+    "issues": [
+      "High null rate (>20%) columns: {'max_glu_serum': 95.04, 'A1Cresult': 83.12}"
+    ]
+  }
+}
