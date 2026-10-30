@@ -1,0 +1,6 @@
+data/*.csv
+data/*.zip
+reports/model.joblib
+__pycache__/
+*.egg-info/
+.pytest_cache/

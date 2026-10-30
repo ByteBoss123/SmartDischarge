@@ -1,0 +1,276 @@
+{
+  "data": {
+    "source": "UCI Diabetes 130-US Hospitals 1999-2008 (Strack et al., 2014)",
+    "cohort_steps": [
+      {
+        "step": "raw encounters",
+        "rows": 101766
+      },
+      {
+        "step": "first encounter per patient",
+        "rows": 71518
+      },
+      {
+        "step": "exclude expired and hospice discharges",
+        "rows": 69973
+      },
+      {
+        "step": "positives (readmitted <30 days)",
+        "rows": 6277
+      }
+    ],
+    "base_rate": 0.0897,
+    "split": {
+      "train": 41983,
+      "validation": 13995,
+      "test": 13995,
+      "test_positives": 1255
+    }
+  },
+  "model_selection_validation_auroc": {
+    "rule: prior inpatient visits": 0.5533,
+    "logistic regression": 0.6476,
+    "xgboost": 0.6538
+  },
+  "chosen_model": "xgboost",
+  "xgboost_best_iteration": 339,
+  "test": {
+    "auroc": 0.6461,
+    "auroc_ci95": [
+      0.6302,
+      0.6609
+    ],
+    "auprc": 0.1624,
+    "auprc_random_baseline": 0.0897,
+    "brier": 0.07977,
+    "brier_base_rate_only": 0.08163,
+    "uncalibrated_auroc_all_candidates": {
+      "rule: prior inpatient visits": 0.5391,
+      "logistic regression": 0.6392,
+      "xgboost": 0.6461
+    },
+    "calibration_deciles": [
+      {
+        "mean_predicted": 0.0523,
+        "observed": 0.0386
+      },
+      {
+        "mean_predicted": 0.0574,
+        "observed": 0.0465
+      },
+      {
+        "mean_predicted": 0.0613,
+        "observed": 0.0571
+      },
+      {
+        "mean_predicted": 0.0654,
+        "observed": 0.0686
+      },
+      {
+        "mean_predicted": 0.07,
+        "observed": 0.0764
+      },
+      {
+        "mean_predicted": 0.0758,
+        "observed": 0.0865
+      },
+      {
+        "mean_predicted": 0.0839,
+        "observed": 0.0944
+      },
+      {
+        "mean_predicted": 0.0959,
+        "observed": 0.1007
+      },
+      {
+        "mean_predicted": 0.1166,
+        "observed": 0.1215
+      },
+      {
+        "mean_predicted": 0.2197,
+        "observed": 0.2064
+      }
+    ]
+  },
+  "cv5_auroc_train_val": {
+    "mean": 0.6543,
+    "std": 0.0084
+  },
+  "capacity_scenarios": [
+    {
+      "share_of_discharges": 0.05,
+      "flagged": 700,
+      "readmissions_caught": 163,
+      "precision": 0.2329,
+      "recall": 0.1299,
+      "lift_vs_random": 2.6,
+      "calls_per_readmission_caught": 4.3
+    },
+    {
+      "share_of_discharges": 0.1,
+      "flagged": 1400,
+      "readmissions_caught": 289,
+      "precision": 0.2064,
+      "recall": 0.2303,
+      "lift_vs_random": 2.3,
+      "calls_per_readmission_caught": 4.8
+    },
+    {
+      "share_of_discharges": 0.2,
+      "flagged": 2799,
+      "readmissions_caught": 459,
+      "precision": 0.164,
+      "recall": 0.3657,
+      "lift_vs_random": 1.83,
+      "calls_per_readmission_caught": 6.1
+    }
+  ],
+  "subgroup_auroc": {
+    "race": {
+      "AfricanAmerican": {
+        "n": 2598,
+        "positives": 253,
+        "auroc": 0.6611,
+        "ci95": [
+          0.6199,
+          0.6976
+        ]
+      },
+      "Asian": {
+        "n": 92,
+        "positives": 8,
+        "auroc": null,
+        "note": "fewer than 30 positives, not scored"
+      },
+      "Caucasian": {
+        "n": 10373,
+        "positives": 940,
+        "auroc": 0.6372,
+        "ci95": [
+          0.618,
+          0.655
+        ]
+      },
+      "Hispanic": {
+        "n": 311,
+        "positives": 23,
+        "auroc": null,
+        "note": "fewer than 30 positives, not scored"
+      },
+      "Missing": {
+        "n": 403,
+        "positives": 21,
+        "auroc": null,
+        "note": "fewer than 30 positives, not scored"
+      },
+      "Other": {
+        "n": 218,
+        "positives": 10,
+        "auroc": null,
+        "note": "fewer than 30 positives, not scored"
+      }
+    },
+    "gender": {
+      "Female": {
+        "n": 7465,
+        "positives": 675,
+        "auroc": 0.6504,
+        "ci95": [
+          0.6294,
+          0.671
+        ]
+      },
+      "Male": {
+        "n": 6529,
+        "positives": 580,
+        "auroc": 0.6409,
+        "ci95": [
+          0.6198,
+          0.6654
+        ]
+      },
+      "Missing": {
+        "n": 1,
+        "positives": 0,
+        "auroc": null,
+        "note": "fewer than 30 positives, not scored"
+      }
+    },
+    "age_band": {
+      "50-69": {
+        "n": 5671,
+        "positives": 466,
+        "auroc": 0.646,
+        "ci95": [
+          0.6201,
+          0.6728
+        ]
+      },
+      "70+": {
+        "n": 6068,
+        "positives": 632,
+        "auroc": 0.626,
+        "ci95": [
+          0.6029,
+          0.6476
+        ]
+      },
+      "<50": {
+        "n": 2256,
+        "positives": 157,
+        "auroc": 0.6535,
+        "ci95": [
+          0.6051,
+          0.6966
+        ]
+      }
+    }
+  },
+  "score_psi_test_vs_validation": 0.001,
+  "top_features_mean_abs_shap": [
+    {
+      "feature": "discharge_group",
+      "mean_abs_shap": 0.3442
+    },
+    {
+      "feature": "diag_1_group",
+      "mean_abs_shap": 0.1121
+    },
+    {
+      "feature": "number_inpatient",
+      "mean_abs_shap": 0.1035
+    },
+    {
+      "feature": "payer_code_top",
+      "mean_abs_shap": 0.0947
+    },
+    {
+      "feature": "time_in_hospital",
+      "mean_abs_shap": 0.0886
+    },
+    {
+      "feature": "prior_visits_total",
+      "mean_abs_shap": 0.0728
+    },
+    {
+      "feature": "age_years",
+      "mean_abs_shap": 0.0635
+    },
+    {
+      "feature": "diag_2_group",
+      "mean_abs_shap": 0.0619
+    },
+    {
+      "feature": "diag_3_group",
+      "mean_abs_shap": 0.0523
+    },
+    {
+      "feature": "medical_specialty_top",
+      "mean_abs_shap": 0.0516
+    }
+  ],
+  "tier_cutoffs_from_validation": {
+    "follow_up_min_prob": 0.1352,
+    "monitor_min_prob": 0.1048
+  }
+}

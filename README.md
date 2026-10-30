@@ -1,319 +1,111 @@
-# SmartDischarge — 30-Day Hospital Readmission Prediction
+# SmartDischarge: 30-Day Readmission Risk at Discharge
 
-> End-to-end production ML system predicting 30-day hospital readmission risk for diabetic patients. Trained on 81K+ clinical encounters across 130 US hospitals. Deployed via FastAPI with SHAP explainability, drift monitoring, and CMS penalty impact quantification.
+Which diabetic patients should a care team call after discharge? This project scores each discharge for
+30-day readmission risk, checks the score is calibrated and fair across groups, and shows what a team
+with limited follow-up capacity would actually catch.
 
----
+**Stack:** Python, pandas, scikit-learn, XGBoost, SHAP, FastAPI, pytest, GitHub Actions, Docker
 
-## Real-world problem
+## Data
 
-US hospitals face up to **3% Medicare revenue penalties** under the [CMS Hospital Readmissions Reduction Program (HRRP)](https://www.cms.gov/medicare/payment/prospective-payment-systems/acute-inpatient-pps/hospital-readmissions-reduction-program-hrrp) for excess 30-day readmissions. For a 300-bed community hospital:
+[UCI Diabetes 130-US Hospitals, 1999-2008](https://archive.ics.uci.edu/dataset/296) (Strack et al., 2014):
+101,766 real inpatient encounters of diabetic patients at 130 US hospitals. `data/download.sh` fetches it
+and verifies the SHA-256.
 
-- ~1,200 Medicare discharges/year × avg DRG payment $12,000 = **$14.4M base**
-- Max 3% CMS penalty = **$432,000/year at risk**
-- Average cost per readmission = **$15,200** (CMS 2023)
+**Cohort** (`src/smartdischarge/data.py`):
 
-A 13% relative reduction in readmission rate using this system = **~$190K annual impact** per hospital.
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Layer 1 — Data Ingestion (Data Engineer)                   │
-│  101K encounters · Schema validation · MD5 checksum · Parquet│
-│  src/ingestion/ingest.py                                    │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 2 — Feature Engineering (Data Scientist + DE)        │
-│  Charlson proxy · Utilisation risk · Med management        │
-│  31 features · dbt SQL models · src/features/engineer.py   │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 3 — Predictive Model (Data Scientist)                │
-│  XGBoost + Platt calibration · SHAP explainability          │
-│  AUROC · AUPRC · Fairness audit · src/model/train.py       │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 4 — Production API (ML Engineer)                     │
-│  FastAPI · <120ms latency · 3-tier routing · Review queue  │
-│  Drift detection · CI/CD · src/api/server.py               │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 5 — Analytics Dashboard (DA + BA)                    │
-│  KPI scorecards · ROC/calibration · CMS impact $           │
-│  Fairness charts · src/dashboard/analytics.py              │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Role coverage
-
-| Role | Layer | Key artefact |
-|---|---|---|
-| **Data Engineer** | 1–2 | `ingest.py` — schema validation, MD5 checksum, parquet partitioning, audit log |
-| **Data Engineer** | 2 | `dbt/models/` — staging → intermediate → mart SQL models |
-| **Data Scientist** | 2–3 | `engineer.py` + `train.py` — Charlson index, XGBoost, SHAP, calibration, AUROC, fairness |
-| **ML Engineer** | 4 | `server.py` — FastAPI, prediction routing, review queue, latency tracking |
-| **ML Engineer** | 4b | `drift.py` — PSI drift detection, score monitoring, retraining alerts |
-| **Data Analyst** | 5 | `analytics.py` — readmission trends, A1C cohorts, risk factor prevalence |
-| **Business Analyst** | 5 | `analytics.py` — CMS penalty model, prevented readmissions, ROI per dollar |
-
----
-
-## Tech stack
-
-**Data pipeline:** Python · Pandas · PyArrow · dbt (SQL models)  
-**ML:** XGBoost · scikit-learn · SHAP · Platt calibration  
-**API:** FastAPI · Uvicorn · Pydantic  
-**Event streaming:** Apache Kafka (confluent-kafka) · producer/consumer · two-topic architecture  
-**Monitoring:** PSI drift detection (Population Stability Index)  
-**Dashboard:** Plotly  
-**Production path:** Docker · Kubernetes · AWS SageMaker (architecture documented)  
-
----
-
-## Dataset
-
-**UCI Diabetes 130-US Hospitals** (Strack et al., 2014)  
-- 101,766 inpatient encounters across 130 US hospitals (1999–2008)  
-- 50 features: demographics, diagnoses (ICD-9), labs, medications, prior utilisation  
-- Target: 30-day readmission label  
-- Source: [archive.ics.uci.edu/dataset/296](https://archive.ics.uci.edu/dataset/296/diabetes+130-us+hospitals+for+years+1999-2008)  
-- No PHI — freely redistributable
-
-**After preprocessing:** 81,155 clean encounters (first encounter per patient, hospice/death excluded)
-
----
-
-## Kafka event streaming
-
-The API layer publishes two Kafka topics after every prediction:
-
-| Topic | Contents | Consumers |
-|---|---|---|
-| `smartdischarge.predictions` | Every scored encounter (all risk tiers) | Downstream dashboards, audit systems |
-| `smartdischarge.alerts` | HIGH-risk encounters only | Care-team notification services |
-
-A standalone consumer (`src/kafka/consumer.py`) subscribes to `smartdischarge.encounters.raw` — replacing the batch CSV loader for real-time deployments where an EHR system emits discharge events upstream.
-
-```
-EHR discharge event
-      │
-      ▼
-smartdischarge.encounters.raw  ←  src/kafka/consumer.py
-      │
-      ▼  (validate + predict)
-smartdischarge.predictions     →  dashboards, audit
-smartdischarge.alerts          →  care-team alerts (HIGH-risk only)
-```
-
-**Run Kafka locally (Docker):**
-```bash
-docker compose -f docker-compose.kafka.yml up -d
-# Kafka UI at http://localhost:8080
-# API at http://localhost:8000
-```
-
-**Environment variables:**
-```
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092   # default
-KAFKA_ENABLED=true                       # set false to disable (API stays live)
-```
-
-**Run the consumer standalone:**
-```bash
-python -m src.kafka.consumer
-```
-
----
-
-## Quick start
-
-```bash
-# 1. Clone and install
-git clone https://github.com/ByteBoss123/SmartDischarge
-cd SmartDischarge
-pip install -r requirements.txt
-
-# 2. Download dataset (free, no account needed)
-#    Place diabetic_data.csv in data/raw/
-
-# 3. Run full pipeline (ingestion → features → training → monitoring → dashboard)
-python run_pipeline.py
-
-# 4. Start prediction API
-uvicorn src.api.server:app --host 0.0.0.0 --port 8000
-
-# 5. Open dashboard
-open docs/dashboard.html
-```
-
----
-
-## API usage
-
-**Single prediction with SHAP explanation:**
-
-```bash
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{
-    "encounter_id": "ENC-001",
-    "time_in_hospital": 8,
-    "number_inpatient": 2,
-    "number_emergency": 1,
-    "number_outpatient": 0,
-    "number_diagnoses": 9,
-    "num_medications": 18,
-    "num_lab_procedures": 52,
-    "num_procedures": 1,
-    "age_midpoint": 72,
-    "diabetesMed": "Yes",
-    "change": "Ch",
-    "A1Cresult": "None",
-    "admission_type_id": 1
-  }'
-```
-
-**Response:**
-```json
-{
-  "request_id": "a3f1c2b9",
-  "encounter_id": "ENC-001",
-  "readmit_probability": 0.412,
-  "risk_tier": "HIGH",
-  "needs_review": true,
-  "top_risk_drivers": [
-    {"feature": "number_inpatient",  "shap_value": 0.182, "direction": "increases risk", "value": 2.0},
-    {"feature": "clinical_risk_score","shap_value": 0.147, "direction": "increases risk", "value": 0.71},
-    {"feature": "los_x_diagnoses",   "shap_value": 0.121, "direction": "increases risk", "value": 72.0}
-  ],
-  "latency_ms": 18.4,
-  "model_version": "smartdischarge-v1.0"
-}
-```
-
-**Endpoints:**
-
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/predict` | Single patient risk score + SHAP explanation |
-| POST | `/predict/batch` | Batch predictions for discharge workflow |
-| GET | `/review-queue` | High-risk patients awaiting care coordinator review |
-| GET | `/stats` | Live latency, risk distribution, queue depth |
-| GET | `/model-info` | AUROC, thresholds, top features, fairness summary |
-| GET | `/health` | Liveness check |
-
----
-
-## Risk tier routing
-
-| Tier | Threshold | Action |
-|---|---|---|
-| **HIGH** | prob ≥ 0.35 | Immediate care coordinator alert + intervention plan |
-| **MEDIUM** | prob 0.15–0.35 | Serve prediction with clinical caveat, flag for follow-up |
-| **LOW** | prob < 0.15 | Standard discharge pathway |
-
----
-
-## Model performance
-
-| Metric | Value |
+| Step | Rows |
 |---|---|
-| AUROC | 0.537 |
-| AUPRC | 0.065 |
-| CV AUROC (5-fold) | 0.520 ± 0.016 |
-| Calibration error | 0.000 |
-| Fairness flags | None |
+| Raw encounters | 101,766 |
+| First encounter per patient (later ones would leak the outcome across splits) | 71,518 |
+| Exclude expired and hospice discharges (no readmission possible) | 69,973 |
+| Readmitted within 30 days (positive label) | 6,277 (9.0%) |
 
-> **Note on AUROC:** 0.53–0.67 is typical for this dataset and problem — [published research](https://pmc.ncbi.nlm.nih.gov/articles/PMC12085305/) achieves 0.63–0.67 AUROC using the same UCI data. The value is in the full production system (pipeline + explainability + deployment + monitoring), not raw model accuracy.
+Split 60/20/20, stratified: 41,983 train, 13,995 validation, 13,995 test. Each patient appears once.
 
----
+## Results (`reports/metrics.json`)
 
-## Key engineering decisions
+Models were compared on the validation set only, then the chosen model was calibrated on validation and
+scored once on the test set.
 
-**Why first-encounter-per-patient deduplication?**  
-Including multiple encounters per patient leaks information across training/test splits and inflates AUROC. Proper deduplication reflects real deployment: you score a patient at discharge, not after you already know they came back.
+| Model | Validation AUROC | Test AUROC |
+|---|---|---|
+| Rule: rank by prior-year inpatient visits | 0.553 | 0.539 |
+| Logistic regression | 0.648 | 0.639 |
+| **XGBoost, Platt-calibrated (chosen)** | **0.654** | **0.646** (95% CI 0.630 to 0.661) |
 
-**Why Platt scaling (calibration)?**  
-Raw XGBoost probabilities are often overconfident on imbalanced data. Calibration ensures the model's `0.35` really means 35% readmission risk — critical for clinical thresholds to be clinically meaningful.
+- **Stability:** 5-fold cross-validation on train+validation, AUROC 0.654 ± 0.008.
+- **Ranking quality:** AUPRC 0.162 vs a 0.090 random baseline.
+- **Calibration:** Brier score 0.0798 vs 0.0816 for predicting the base rate. Observed readmission rates
+  track predicted risk across all 10 deciles (top decile: 22.0% predicted, 20.6% observed).
+- **In context:** [published work on this dataset](https://pmc.ncbi.nlm.nih.gov/articles/PMC12085305/) reports AUROC of about 0.63 to 0.67. This model sits in
+  that range; 30-day readmission is hard to predict from discharge records alone.
 
-**Why SHAP over feature importance?**  
-Feature importance tells you globally what the model uses. SHAP tells you *why this specific patient* got this score — the "top 3 risk drivers" output is what a care coordinator actually acts on.
+![ROC and calibration](reports/roc_calibration.png)
 
-**Why PSI for drift detection?**  
-Population Stability Index detects distribution shift before it degrades model performance. It works even without ground truth labels — you don't need to wait 30 days for readmission outcomes to know your input distribution has shifted.
+### What a care team would catch (test set, 13,995 discharges, 1,255 readmissions)
 
----
+| Follow-up capacity | Discharges called | Readmissions among them | Share of all readmissions | Lift vs random | Calls per readmission caught |
+|---|---|---|---|---|---|
+| Top 5% of scores | 700 | 163 | 13.0% | 2.6x | 4.3 |
+| Top 10% | 1,400 | 289 | 23.0% | 2.3x | 4.8 |
+| Top 20% | 2,799 | 459 | 36.6% | 1.8x | 6.1 |
 
-## dbt models
+How many of those readmissions a call would prevent depends on the intervention, which this data
+doesn't measure, so no dollar savings are claimed.
 
-```
-dbt/models/
-├── staging/
-│   └── stg_encounters.sql          # clean raw CSV, nullify sentinels, cast types
-├── intermediate/
-│   └── int_encounter_features.sql  # feature engineering, deduplication
-└── mart/
-    └── mart_readmission_kpis.sql   # KPI aggregations for BI tools
-```
+### Fairness check: test AUROC by group (95% bootstrap CI)
 
----
+| Group | n | Readmissions | AUROC |
+|---|---|---|---|
+| African American | 2,598 | 253 | 0.661 (0.620 to 0.698) |
+| Caucasian | 10,373 | 940 | 0.637 (0.618 to 0.655) |
+| Female | 7,465 | 675 | 0.650 (0.629 to 0.671) |
+| Male | 6,529 | 580 | 0.641 (0.620 to 0.665) |
+| Age under 50 | 2,256 | 157 | 0.654 (0.605 to 0.697) |
+| Age 50 to 69 | 5,671 | 466 | 0.646 (0.620 to 0.673) |
+| Age 70+ | 6,068 | 632 | 0.626 (0.603 to 0.648) |
 
-## Business impact model
+All intervals overlap, so no group is ranked measurably worse than another. Asian, Hispanic, Other and
+missing-race groups have fewer than 30 readmissions in the test set, so they are reported but not scored.
 
-Based on CMS HRRP public data:
+### What drives the score (mean |SHAP|, test sample of 2,000)
 
-```
-Annual Medicare discharges (300-bed hospital):  1,200
-Avg DRG payment:                               $12,000
-Max CMS penalty (3%):                         $432,000
+1. Discharge destination (home, home health, skilled nursing, transfer)
+2. Primary diagnosis group
+3. Prior-year inpatient visits
+4. Payer code
+5. Length of stay
 
-Model impact (13% relative readmit reduction):
-  Prevented readmissions/year:                       9
-  Direct cost savings:                        $134,345
-  CMS penalty reduction:                       $56,160
-  Total annual impact:                        $190,505
-```
+## Serving and monitoring
 
-Scaling to a 10-hospital system: **~$1.9M annual impact**.
+- `src/smartdischarge/api.py`: FastAPI `POST /score` takes one encounter in the raw UCI column format
+  and returns a calibrated probability and a tier. "Follow up" is the top 10% of validation-set scores
+  (probability ≥ 0.135) and "monitor" the next 10% (≥ 0.105).
+- `src/smartdischarge/drift.py`: Population Stability Index. Test vs validation score PSI is 0.001 (stable).
+- 11 tests: cohort rules, ICD-9 grouping, feature vocabulary reuse, PSI behavior, the real-data cohort
+  counts above, and an end-to-end API call.
 
----
+## Run
 
-## Project structure
-
-```
-SmartDischarge/
-├── data/
-│   ├── raw/                    # source CSV (not committed to git)
-│   └── processed/              # parquet, model artefacts, audit log
-├── dbt/
-│   └── models/                 # staging → intermediate → mart
-├── src/
-│   ├── ingestion/ingest.py     # Layer 1: data pipeline
-│   ├── features/engineer.py    # Layer 2: feature engineering
-│   ├── model/train.py          # Layer 3: XGBoost + SHAP + fairness
-│   ├── api/server.py           # Layer 4: FastAPI serving
-│   ├── monitoring/drift.py     # Layer 4b: PSI drift detection
-│   └── dashboard/analytics.py # Layer 5: Plotly dashboard + CMS impact
-├── tests/                      # unit + integration tests
-├── docs/                       # model report, monitoring report, dashboard.html
-├── run_pipeline.py             # master orchestrator
-├── requirements.txt
-├── Dockerfile
-└── README.md
+```bash
+pip install -e ".[test]"
+bash data/download.sh
+python -m smartdischarge.train      # writes reports/metrics.json, roc_calibration.png, model.joblib
+pytest -q
+uvicorn smartdischarge.api:app      # then POST /score
 ```
 
----
+Results above are from a CPU run with seed 42; rerunning reproduces them exactly.
 
-## References
+## Limitations
 
-1. Strack et al. (2014). *Impact of HbA1c Measurement on Hospital Readmission Rates.* BioMed Research International. — [UCI Dataset source](https://archive.uci.edu/dataset/296)
-2. CMS (2024). *Hospital Readmissions Reduction Program.* — [cms.gov/medicare/payment](https://www.cms.gov/medicare/payment/prospective-payment-systems/acute-inpatient-pps/hospital-readmissions-reduction-program-hrrp)
-3. Goldstein et al. (2024). *Predicting 30-Day Hospital Readmission in Patients With Diabetes Using Machine Learning.* PMC12085305.
+- Data is from 1999-2008 and only includes diabetic inpatients; a model for current use would need recent
+  records and a check on the population it will score.
+- AUROC of 0.646 is useful for prioritizing calls, not for decisions about individual patients.
 
----
+## Changes from the earlier version
 
-## Author
-
-**Amarnath Reddy Ganta**  
-M.S. Data Analytics Engineering, George Mason University (May 2026)  
-[linkedin.com/in/amarnath-reddy-ganta](https://www.linkedin.com/in/amarnath-reddy-ganta) · [github.com/ByteBoss123](https://github.com/ByteBoss123)
+The earlier version reported a test AUROC of 0.537, imported modules that weren't in the repo, and showed
+a $190K impact estimate not derived from the model. This rebuild is one runnable package; every number
+above comes from `reports/metrics.json`.
